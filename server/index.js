@@ -124,6 +124,8 @@ app.post('/api/webhook/proxy', async (req, res) => {
     const webhookUrl = req.body.webhookUrl;
     const fileBase64 = req.body.file;  // Base64 encoded file
 
+    console.log('Webhook proxy called:', webhookUrl);
+
     if (!webhookUrl) {
         return res.status(400).json({ error: 'webhookUrl is required' });
     }
@@ -135,6 +137,7 @@ app.post('/api/webhook/proxy', async (req, res) => {
     try {
         // Convert base64 to buffer
         const buffer = Buffer.from(fileBase64, 'base64');
+        console.log('File size:', buffer.length, 'bytes');
 
         // Create form-data like payload
         const FormData = require('form-data');
@@ -142,14 +145,27 @@ app.post('/api/webhook/proxy', async (req, res) => {
         form.append('file', buffer, { filename: 'invoice.pdf', contentType: 'application/pdf' });
 
         // Forward request to n8n webhook
+        console.log('Sending to n8n...');
         const response = await fetch(webhookUrl, {
             method: 'POST',
             body: form,
             headers: form.getHeaders()
         });
 
-        const data = await response.json();
-        res.json(data);
+        console.log('n8n response status:', response.status);
+
+        // Get response as text first
+        const text = await response.text();
+        console.log('n8n response:', text.substring(0, 500));
+
+        // Try to parse as JSON
+        try {
+            const data = JSON.parse(text);
+            res.json(data);
+        } catch {
+            // If not JSON, return as raw
+            res.json({ raw: text });
+        }
     } catch (error) {
         console.error('Webhook proxy error:', error);
         res.status(500).json({ error: 'Failed to forward request to webhook: ' + error.message });

@@ -160,12 +160,16 @@ function App() {
       const isHttpWebhook = webhookUrl.startsWith('http://')
 
       if (isHttpsPage && isHttpWebhook) {
-        // Use Vercel serverless function proxy - convert file to base64
+        // Use proxy - convert file to base64
         const reader = new FileReader()
         reader.onload = async () => {
           try {
             const base64 = reader.result.split(',')[1]
-            const response = await fetch('/api/webhook-proxy', {
+            // Use Render backend if configured, otherwise Vercel serverless
+            const proxyUrl = import.meta.env.VITE_PROXY_URL
+              ? `${import.meta.env.VITE_PROXY_URL}/api/webhook/proxy`
+              : '/api/webhook-proxy'
+            const response = await fetch(proxyUrl, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ webhookUrl, file: base64 })
