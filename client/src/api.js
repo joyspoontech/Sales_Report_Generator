@@ -43,6 +43,12 @@ export const api = {
     },
 
     async saveProduct(sku, product) {
+        // Prevent saving empty or invalid data
+        if (!sku || !product || !product.name) {
+            console.warn('Attempted to save empty/invalid product, skipping')
+            return { success: false, error: 'Invalid product data' }
+        }
+
         if (isSupabaseConnected()) {
             try {
                 const { error } = await supabase

@@ -232,6 +232,7 @@ function App() {
   const recalculateItems = (lineItems = null) => {
     const sourceItems = lineItems || extractedData?.line_items || []
     console.log('Processing items:', sourceItems.length)
+    console.log('Product Master has', Object.keys(productMaster).length, 'products:', Object.keys(productMaster))
 
     const items = sourceItems.map(item => {
       const normalizedSku = normalizeSku(item.sku)
@@ -290,22 +291,53 @@ function App() {
 
   const generateCSV = () => {
     if (!extractedData) return
-    const headers = ['#', 'SKU', 'Description', 'Qty', 'Pcs/Box', 'Boxes', 'Box Wt (kg)', 'Dimensions', 'Total Wt (kg)', 'Value (Rs)']
-    const rows = processedItems.map((item, i) => [
-      i + 1,
-      item.sku,
-      `"${item.description?.replace(/"/g, '""') || ''}"`,
-      item.quantity,
-      item.pieces_per_box,
-      item.num_boxes,
-      item.box_weight_kg,
-      item.box_dimensions?.replace(/×/g, 'x') || '',  // Replace × with x for CSV compatibility
-      item.total_weight.toFixed(1),
-      item.taxable_value.toFixed(2)
-    ])
-    rows.push(['', '', 'TOTAL', totals.quantity, '', totals.boxes, '', '', totals.weight.toFixed(1), totals.value.toFixed(2)])
 
-    const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n')
+    // Get tax values from extracted data
+    const taxAmount = extractedData.totals?.tax || 0
+    const invoiceValue = extractedData.totals?.invoice_value || totals.value
+
+    // Build CSV matching Excel format
+    const csvRows = [
+      ['SHIPPING REPORT'],
+      [''],
+      [`Invoice`, extractedData.invoice.number, '', `Invoice Date`, extractedData.invoice.date],
+      [''],
+      [`FROM`, extractedData.seller.name],
+      [`GSTIN`, extractedData.seller.gstin],
+      [''],
+      [`TO`, extractedData.buyer.name],
+      [`GSTIN`, extractedData.buyer.gstin],
+      [''],
+      ['SUMMARY'],
+      [`Total`, totals.quantity, '', `Total Boxes`, totals.boxes],
+      [`Total`, `${totals.weight.toFixed(1)} kg`],
+      [''],
+      // Table header
+      ['#', 'SKU', 'Description', 'Quantity', 'Pcs/Box', 'Boxes', 'Box Wt (kg)', 'Dimensions', 'Total Wt (kg)', 'Value (Rs)']
+    ]
+
+    // Add items
+    processedItems.forEach((item, i) => {
+      csvRows.push([
+        i + 1,
+        item.sku,
+        `"${item.description?.replace(/"/g, '""') || ''}"`,
+        item.quantity,
+        item.pieces_per_box,
+        item.num_boxes,
+        item.box_weight_kg,
+        item.box_dimensions?.replace(/×/g, 'x') || '',
+        item.total_weight.toFixed(1),
+        item.taxable_value.toFixed(2)
+      ])
+    })
+
+    // Totals and tax summary
+    csvRows.push(['', '', 'TOTAL', totals.quantity, '', totals.boxes, '', '', totals.weight.toFixed(1), totals.value.toFixed(2)])
+    csvRows.push(['', '', '', '', '', '', '', '', 'Total Tax', taxAmount.toFixed(2)])
+    csvRows.push(['', '', '', '', '', '', '', '', 'Invoice Value', invoiceValue.toFixed(2)])
+
+    const csv = csvRows.map(r => r.join(',')).join('\n')
     // Add UTF-8 BOM for Excel compatibility
     const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' })
     const url = URL.createObjectURL(blob)
@@ -319,6 +351,11 @@ function App() {
   const generateExcel = () => {
     if (!extractedData) return
     const wb = XLSX.utils.book_new()
+
+    // Get tax values from extracted data
+    const taxableValue = extractedData.totals?.taxable_value || totals.value
+    const taxAmount = extractedData.totals?.tax || 0
+    const invoiceValue = extractedData.totals?.invoice_value || (taxableValue + taxAmount)
 
     // Single clean sheet with all data
     const sheetData = [
@@ -338,7 +375,7 @@ function App() {
       // Summary Totals
       ['SUMMARY'],
       ['Total Pieces:', totals.quantity, '', 'Total Boxes:', totals.boxes],
-      ['Total Weight:', `${totals.weight.toFixed(1)} kg`, '', 'Invoice Value:', `₹${extractedData.totals?.invoice_value || totals.value.toFixed(2)}`],
+      ['Total Weight:', `${totals.weight.toFixed(1)} kg`],
       [''],
       // Items Table Header
       ['#', 'SKU', 'Description', 'Quantity', 'Pcs/Box', 'Boxes', 'Box Wt (kg)', 'Dimensions', 'Total Wt (kg)', 'Value (₹)'],
@@ -363,6 +400,10 @@ function App() {
     // Totals row
     sheetData.push(['', '', 'TOTAL', totals.quantity, '', totals.boxes, '', '', totals.weight.toFixed(1), totals.value.toFixed(2)])
 
+    // Tax and Invoice Total
+    sheetData.push(['', '', '', '', '', '', '', '', 'Total Tax', taxAmount.toFixed(2)])
+    sheetData.push(['', '', '', '', '', '', '', '', 'Invoice Value', invoiceValue.toFixed(2)])
+
     const ws = XLSX.utils.aoa_to_sheet(sheetData)
 
     // Set column widths for better readability
@@ -375,8 +416,8 @@ function App() {
       { wch: 8 },   // Boxes
       { wch: 12 },  // Box Wt
       { wch: 18 },  // Dimensions
-      { wch: 12 },  // Total Wt
-      { wch: 12 }   // Value
+      { wch: 14 },  // Total Wt / Labels
+      { wch: 14 }   // Value / Amounts
     ]
 
     XLSX.utils.book_append_sheet(wb, ws, 'Shipping Report')
@@ -387,6 +428,10 @@ function App() {
   const generatePDF = () => {
     if (!extractedData) return
     const doc = new jsPDF()
+
+    // Get tax values from extracted data
+    const taxAmount = extractedData.totals?.tax || 0
+    const invoiceValue = extractedData.totals?.invoice_value || totals.value
 
     doc.setFontSize(16)
     doc.text('SHIPPING REPORT', 105, 15, { align: 'center' })
@@ -402,15 +447,39 @@ function App() {
     doc.setFontSize(10)
     doc.text(`Total Boxes: ${totals.boxes}    Total Weight: ${totals.weight.toFixed(1)} kg    Total Pieces: ${totals.quantity}`, 20, 50)
 
+    // Build table body with items + totals + tax summary
+    const tableBody = processedItems.map((item, i) => [
+      i + 1, item.sku, item.description.substring(0, 25), item.quantity,
+      item.pieces_per_box, item.num_boxes, item.box_weight_kg,
+      item.total_weight.toFixed(1), item.taxable_value.toFixed(2)
+    ])
+
+    // Add TOTAL, Tax, and Invoice Value rows
+    tableBody.push(['', '', 'TOTAL', totals.quantity, '', totals.boxes, '', totals.weight.toFixed(1), totals.value.toFixed(2)])
+    tableBody.push(['', '', '', '', '', '', '', 'Total Tax', taxAmount.toFixed(2)])
+    tableBody.push(['', '', '', '', '', '', '', 'Invoice Value', invoiceValue.toFixed(2)])
+
     autoTable(doc, {
       startY: 58,
-      head: [['#', 'SKU', 'Description', 'Qty', 'Pcs/Box', 'Boxes', 'Box Wt', 'Total Wt']],
-      body: processedItems.map((item, i) => [i + 1, item.sku, item.description.substring(0, 30), item.quantity, item.pieces_per_box, item.num_boxes, item.box_weight_kg, item.total_weight.toFixed(1)]),
-      foot: [['', '', 'TOTAL', totals.quantity, '', totals.boxes, '', totals.weight.toFixed(1)]],
+      head: [['#', 'SKU', 'Description', 'Qty', 'Pcs/Box', 'Boxes', 'Box Wt', 'Total Wt', 'Value']],
+      body: tableBody,
       theme: 'grid',
       headStyles: { fillColor: [60, 60, 60] },
-      footStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0], fontStyle: 'bold' },
-      styles: { fontSize: 8 }
+      styles: { fontSize: 7 },
+      columnStyles: {
+        8: { halign: 'right' }
+      },
+      didParseCell: function (data) {
+        // Style the TOTAL row
+        if (data.row.index === processedItems.length && data.section === 'body') {
+          data.cell.styles.fillColor = [240, 240, 240]
+          data.cell.styles.fontStyle = 'bold'
+        }
+        // Style the Tax and Invoice Value rows
+        if (data.row.index > processedItems.length && data.section === 'body') {
+          data.cell.styles.fontStyle = 'bold'
+        }
+      }
     })
 
     doc.save(`Report_${extractedData.invoice.number.replace(/\//g, '_')}.pdf`)
