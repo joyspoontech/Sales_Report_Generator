@@ -1,5 +1,3 @@
-import FormData from 'form-data';
-
 export const config = {
     api: {
         bodyParser: {
@@ -36,19 +34,40 @@ export default async function handler(req, res) {
         // Convert base64 to buffer
         const buffer = Buffer.from(file, 'base64');
 
-        // Create form-data
-        const form = new FormData();
-        form.append('file', buffer, { filename: 'invoice.pdf', contentType: 'application/pdf' });
+        // Create boundary
+        const boundary = '----WebKitFormBoundary' + Math.random().toString(36).slice(2);
+
+        // Build the multipart body
+        const header = Buffer.from(
+            `--${boundary}\r\n` +
+            `Content-Disposition: form-data; name="file"; filename="invoice.pdf"\r\n` +
+            `Content-Type: application/pdf\r\n\r\n`
+        );
+
+        const footer = Buffer.from(`\r\n--${boundary}--\r\n`);
+
+        // Concatenate all parts
+        const body = Buffer.concat([header, buffer, footer]);
 
         // Forward to n8n webhook
         const response = await fetch(webhookUrl, {
             method: 'POST',
-            body: form,
-            headers: form.getHeaders(),
+            headers: {
+                'Content-Type': `multipart/form-data; boundary=${boundary}`,
+            },
+            body: body
         });
 
-        const data = await response.json();
-        return res.status(200).json(data);
+        const text = await response.text();
+
+        // Try to parse as JSON
+        try {
+            const data = JSON.parse(text);
+            return res.status(200).json(data);
+        } catch {
+            // Return raw text if not JSON
+            return res.status(200).json({ response: text });
+        }
     } catch (error) {
         console.error('Webhook proxy error:', error);
         return res.status(500).json({ error: 'Failed to forward request: ' + error.message });
