@@ -160,19 +160,25 @@ function App() {
       const isHttpWebhook = webhookUrl.startsWith('http://')
 
       if (isHttpsPage && isHttpWebhook) {
-        // Use proxy - convert file to base64
+        // Use Vercel serverless function proxy - convert file to base64
         const reader = new FileReader()
         reader.onload = async () => {
-          const base64 = reader.result.split(',')[1]
-          const proxyUrl = import.meta.env.VITE_API_URL || 'http://localhost:3001/api'
-          const response = await fetch(`${proxyUrl}/webhook/proxy`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ webhookUrl, file: base64 })
-          })
-          if (!response.ok) throw new Error('Upload failed')
-          const data = await response.json()
-          processData(Array.isArray(data) ? data[0] : data)
+          try {
+            const base64 = reader.result.split(',')[1]
+            const response = await fetch('/api/webhook-proxy', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ webhookUrl, file: base64 })
+            })
+            if (!response.ok) {
+              const errorData = await response.json().catch(() => ({}))
+              throw new Error(errorData.error || 'Upload failed')
+            }
+            const data = await response.json()
+            processData(Array.isArray(data) ? data[0] : data)
+          } catch (err) {
+            showToast('Failed to process invoice: ' + err.message, 'error')
+          }
           setIsLoading(false)
         }
         reader.onerror = () => {
