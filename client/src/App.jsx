@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react'
-import { Upload, FileText, Package, Settings, Download, Check, X, Clock } from 'lucide-react'
+import { Upload, FileText, Package, Settings, Download, Check, X, Clock, Save } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
@@ -421,9 +421,11 @@ function App() {
   const saveToHistory = async () => {
     if (!extractedData) return
 
+    const invoiceNum = extractedData.invoice.number.trim()
+
     const historyEntry = {
       id: Date.now(),
-      invoice_number: extractedData.invoice.number,
+      invoice_number: invoiceNum,
       invoice_date: extractedData.invoice.date,
       seller_name: extractedData.seller.name,
       buyer_name: extractedData.buyer.name,
@@ -432,27 +434,41 @@ function App() {
       invoice_value: extractedData.totals.invoice_value,
       line_items: processedItems,
       extracted_data: extractedData,
-      created_at: new Date().toISOString()
+      updated_at: new Date().toISOString()
     }
 
-    // Check if already exists
-    if (invoiceHistory.some(h => h.invoice_number === historyEntry.invoice_number)) {
-      return // Already in history
+    // Check if already exists - if so, update it instead of adding new
+    const existingIndex = invoiceHistory.findIndex(h => h.invoice_number.trim() === invoiceNum)
+    console.log('Looking for invoice:', invoiceNum, 'Found at index:', existingIndex)
+
+    let newHistory
+    if (existingIndex >= 0) {
+      // Update existing entry - keep original id and created_at
+      console.log('Updating existing entry at index:', existingIndex)
+      newHistory = [...invoiceHistory]
+      newHistory[existingIndex] = {
+        ...newHistory[existingIndex],
+        ...historyEntry,
+        id: newHistory[existingIndex].id,
+        created_at: newHistory[existingIndex].created_at || historyEntry.updated_at
+      }
+    } else {
+      // Add new entry
+      console.log('Adding new entry')
+      historyEntry.created_at = historyEntry.updated_at
+      newHistory = [historyEntry, ...invoiceHistory].slice(0, 50)
     }
 
-    const newHistory = [historyEntry, ...invoiceHistory].slice(0, 50) // Keep last 50
     setInvoiceHistory(newHistory)
 
     if (backendConnected) {
-      console.log('Saving invoice to Supabase...', historyEntry.invoice_number)
+      console.log('Saving invoice to backend...', historyEntry.invoice_number)
       const result = await api.saveInvoice(historyEntry)
-      console.log('Supabase save result:', result)
+      console.log('Save result:', result)
       if (!result?.success) {
-        console.error('Failed to save to Supabase, using localStorage fallback')
         localStorage.setItem('invoiceHistory', JSON.stringify(newHistory))
       }
     } else {
-      console.log('Saving invoice to localStorage...')
       localStorage.setItem('invoiceHistory', JSON.stringify(newHistory))
     }
   }
@@ -633,6 +649,7 @@ function App() {
                   <h2>Extracted Data</h2>
                   <div className="actions">
                     <button className="btn-secondary" onClick={() => recalculateItems()}>🔄 Recalculate</button>
+                    <button className="btn-secondary" onClick={() => { saveToHistory(); showToast('Saved to history!') }}><Save size={16} /> Save</button>
                     <button className="btn-secondary" onClick={generateCSV}><Download size={16} /> CSV</button>
                     <button className="btn-secondary" onClick={generateExcel}><Download size={16} /> Excel</button>
                     <button className="btn-primary" onClick={generatePDF}><Download size={16} /> PDF</button>

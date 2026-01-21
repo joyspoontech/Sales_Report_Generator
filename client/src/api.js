@@ -191,9 +191,10 @@ export const api = {
     async saveInvoice(invoice) {
         if (isSupabaseConnected()) {
             try {
+                // Use upsert to update existing or insert new based on invoice_number
                 const { data, error } = await supabase
                     .from('invoices')
-                    .insert({
+                    .upsert({
                         invoice_number: invoice.invoice_number,
                         invoice_date: invoice.invoice_date,
                         seller_name: invoice.seller_name,
@@ -202,7 +203,10 @@ export const api = {
                         total_weight: invoice.total_weight,
                         invoice_value: invoice.invoice_value,
                         line_items: invoice.line_items,
-                        extracted_data: invoice.extracted_data
+                        extracted_data: invoice.extracted_data,
+                        updated_at: new Date().toISOString()
+                    }, {
+                        onConflict: 'invoice_number'  // Update if invoice_number exists
                     })
                     .select()
                     .single()
